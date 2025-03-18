@@ -20,14 +20,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gocolly/colly"
 	prowjobv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 )
 
 const jobName = "ci-kubernetes-e2e-azure-scalability"
+
+var jsonData = map[string][]byte{}
 
 func main() {
 	prowjobsURL := "https://prow.k8s.io/prowjobs.js?omit=annotations,labels,decoration_config,pod_spec"
@@ -75,7 +79,28 @@ func main() {
 
 	// Find and visit all links
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		fmt.Println("Link found:", e.Attr("href"))
+		link := e.Attr("href")
+		fmt.Println("Link found:", link)
+		if strings.Contains(link, "PodStartupLatency_PodStartupLatency_load") {
+			fmt.Println("Found PodStartupLatency link:", link)
+
+			// Get json data from the link
+			resp, err := http.Get(link)
+			if err != nil {
+				fmt.Println("Error fetching JSON data:", err)
+				return
+			}
+			defer resp.Body.Close()
+
+			jsonBody, err := io.ReadAll(resp.Body)
+			if err != nil {
+				fmt.Println("Error reading JSON response body:", err)
+				return
+			}
+
+			jsonData["PodStartupLatency_PodStartupLatency_load"] = jsonBody
+			fmt.Println("JSON data:", string(jsonBody))
+		}
 	})
 
 	c.OnRequest(func(r *colly.Request) {
@@ -83,4 +108,12 @@ func main() {
 	})
 
 	c.Visit("https://gcsweb.k8s.io/gcs/kubernetes-ci-logs/logs/ci-kubernetes-e2e-azure-scalability/" + latestBuildId + "/artifacts/")
+
+	http.HandleFunc("/PodStartupLatency", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonData["PodStartupLatency_PodStartupLatency_load"])
+	})
+
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }

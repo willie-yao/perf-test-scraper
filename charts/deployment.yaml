@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-test-scraper
+  labels:
+    app: perf-test-scraper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-test-scraper
+  template:
+    metadata:
+      labels:
+        app: perf-test-scraper
+    spec:
+      containers:
+      - name: perf-test-scraper
+        image: docker.io/quillie/perf-test-scraper:latest
+        ports:
+        - containerPort: 8080

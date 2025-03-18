@@ -109,7 +109,7 @@ func main() {
 
 	c.Visit("https://gcsweb.k8s.io/gcs/kubernetes-ci-logs/logs/ci-kubernetes-e2e-azure-scalability/" + latestBuildId + "/artifacts/")
 
-	http.HandleFunc("/PodStartupLatency", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/scraper/PodStartupLatency", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData["PodStartupLatency_PodStartupLatency_load"])

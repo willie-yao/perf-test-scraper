@@ -81,7 +81,7 @@ func main() {
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
 		fmt.Println("Link found:", link)
-		if strings.Contains(link, "PodStartupLatency_PodStartupLatency_load") {
+		if strings.Contains(link, "/PodStartupLatency_PodStartupLatency_load") {
 			fmt.Println("Found PodStartupLatency link:", link)
 
 			// Get json data from the link

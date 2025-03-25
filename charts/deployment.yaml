@@ -16,6 +16,6 @@ spec:
     spec:
       containers:
       - name: perf-test-scraper
-        image: docker.io/quillie/perf-test-scraper:latest
+        image: docker.io/quillie/perf-test-scraper:dev
         ports:
         - containerPort: 8080

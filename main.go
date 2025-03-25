@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gocolly/colly"
 	prowjobv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
@@ -33,25 +34,25 @@ const jobName = "ci-kubernetes-e2e-azure-scalability"
 
 var jsonData = map[string][]byte{}
 
-func main() {
+func getLatestBuildId() (string, error) {
 	prowjobsURL := "https://prow.k8s.io/prowjobs.js?omit=annotations,labels,decoration_config,pod_spec"
 	resp, err := http.Get(prowjobsURL)
 	if err != nil {
 		fmt.Println("Error fetching Prow jobs:", err)
-		return
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("Error reading response body:", err)
-		return
+		return "", err
 	}
 
 	prowJobs := &prowjobv1.ProwJobList{}
 	if err := json.Unmarshal(body, prowJobs); err != nil {
 		fmt.Println("Error unmarshalling Prow jobs:", err)
-		return
+		return "", err
 	}
 
 	capzProwJobs := []prowjobv1.ProwJob{}
@@ -68,19 +69,46 @@ func main() {
 	})
 
 	if len(capzProwJobs) == 0 {
-		fmt.Println("No successful Prow jobs found for job name:", jobName)
-		return
+		err = fmt.Errorf("no successful Prow jobs found for job name: %s", jobName)
+		return "", err
 	}
 
 	latestBuildId := capzProwJobs[0].Status.BuildID
 	fmt.Println("Latest Build ID:", latestBuildId)
+	return latestBuildId, nil
+}
 
+func main() {
 	c := colly.NewCollector()
+
+	// Channel to communicate the latest build ID
+	latestBuildIdChan := make(chan string)
+
+	// Goroutine to fetch the latest build ID every hour
+	go func() {
+		for {
+			fmt.Println("Fetching latest build ID...")
+			latestBuildId, err := getLatestBuildId()
+			if err != nil {
+				log.Println("Error getting latest build ID:", err)
+			} else {
+				latestBuildIdChan <- latestBuildId
+			}
+			time.Sleep(1 * time.Hour)
+		}
+	}()
+
+	// Start a goroutine to listen for the latest build ID and trigger scraping
+	go func() {
+		for latestBuildId := range latestBuildIdChan {
+			c.Visit("https://gcsweb.k8s.io/gcs/kubernetes-ci-logs/logs/ci-kubernetes-e2e-azure-scalability/" + latestBuildId + "/artifacts/")
+		}
+	}()
 
 	// Find and visit all links
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
-		fmt.Println("Link found:", link)
+		// fmt.Println("Link found:", link)
 		if strings.Contains(link, "/PodStartupLatency_PodStartupLatency_load") {
 			fmt.Println("Found PodStartupLatency link:", link)
 
@@ -107,11 +135,14 @@ func main() {
 		fmt.Println("Visiting", r.URL)
 	})
 
-	c.Visit("https://gcsweb.k8s.io/gcs/kubernetes-ci-logs/logs/ci-kubernetes-e2e-azure-scalability/" + latestBuildId + "/artifacts/")
-
 	http.HandleFunc("/scraper/PodStartupLatency", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		if jsonData["PodStartupLatency_PodStartupLatency_load"] == nil {
+			http.Error(w, "JSON data not found", http.StatusNotFound)
+			return
+		}
+		// Return the JSON data
 		w.Write(jsonData["PodStartupLatency_PodStartupLatency_load"])
 	})
 

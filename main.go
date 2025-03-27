@@ -28,6 +28,8 @@ import (
 
 	"github.com/gocolly/colly"
 	prowjobv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const jobName = "ci-kubernetes-e2e-azure-scalability"
@@ -110,7 +112,7 @@ func main() {
 		link := e.Attr("href")
 		// fmt.Println("Link found:", link)
 		if strings.Contains(link, "/PodStartupLatency_PodStartupLatency_load") {
-			fmt.Println("Found PodStartupLatency link:", link)
+			// fmt.Println("Found PodStartupLatency link:", link)
 
 			// Get json data from the link
 			resp, err := http.Get(link)
@@ -127,13 +129,15 @@ func main() {
 			}
 
 			jsonData["PodStartupLatency_PodStartupLatency_load"] = jsonBody
-			fmt.Println("JSON data:", string(jsonBody))
+			// fmt.Println("JSON data:", string(jsonBody))
 		}
 	})
 
 	c.OnRequest(func(r *colly.Request) {
 		fmt.Println("Visiting", r.URL)
 	})
+
+	http.Handle("/metrics", promhttp.Handler())
 
 	http.HandleFunc("/scraper/PodStartupLatency", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

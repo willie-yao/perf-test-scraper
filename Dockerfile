@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.23-alpine
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -9,8 +9,7 @@ RUN go mod download
 COPY *.go ./
 
 # Build the Go application
-RUN CGO_ENABLED=0 GOOS=linux go build -o /perf-test-scraper
-
+RUN CGO_ENABLED=0 GOOS=linux go build -o perf-test-scraper
 
 # Build production image
 FROM gcr.io/distroless/static:nonroot

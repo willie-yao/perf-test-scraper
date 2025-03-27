@@ -31,29 +31,10 @@ import (
 	prowjobv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const jobName = "ci-kubernetes-e2e-azure-scalability"
-
-var jsonData = map[string][]byte{}
-
-func recordMetrics() {
-	go func() {
-		for {
-			opsProcessed.Inc()
-			time.Sleep(2 * time.Second)
-		}
-	}()
-}
-
-var (
-	opsProcessed = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "myapp_processed_ops_total",
-		Help: "The total number of processed events",
-	})
-)
 
 func getLatestBuildId() (string, error) {
 	prowjobsURL := "https://prow.k8s.io/prowjobs.js?omit=annotations,labels,decoration_config,pod_spec"
@@ -99,7 +80,12 @@ func getLatestBuildId() (string, error) {
 	return latestBuildId, nil
 }
 
-func addJsonMetricToPrometheus(raw []byte) error {
+func addJsonMetricToPrometheus(raw []byte, fileName string) error {
+
+	fileNameParts := strings.Split(fileName, "_")
+	name := strings.Join(fileNameParts[:len(fileNameParts)-2], "_")
+	fmt.Println("Name:", name)
+
 	var data map[string]interface{}
 	if err := json.Unmarshal(raw, &data); err != nil {
 		panic(err)
@@ -129,7 +115,7 @@ func addJsonMetricToPrometheus(raw []byte) error {
 		podStartup := prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: "capz",
-				Subsystem: "PodStartupLatency",
+				Subsystem: name,
 				Name:      metricName,
 				Help:      metricName,
 			},
@@ -178,8 +164,11 @@ func main() {
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
 		// fmt.Println("Link found:", link)
-		if strings.Contains(link, "/PodStartupLatency_PodStartupLatency_load") {
+		if strings.Contains(link, "PodStartupLatency") {
 			// fmt.Println("Found PodStartupLatency link:", link)
+			urlParts := strings.Split(link, "/")
+			fileName := urlParts[len(urlParts)-1]
+			fmt.Println("File name:", fileName)
 
 			// Get json data from the link
 			resp, err := http.Get(link)
@@ -195,7 +184,7 @@ func main() {
 				return
 			}
 
-			if err := addJsonMetricToPrometheus(jsonBody); err != nil {
+			if err := addJsonMetricToPrometheus(jsonBody, fileName); err != nil {
 				fmt.Println("Error adding JSON metric to Prometheus:", err)
 			}
 

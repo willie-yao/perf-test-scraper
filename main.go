@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gocolly/colly"
+	"github.com/pkg/errors"
 	prowjobv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -98,6 +99,54 @@ func getLatestBuildId() (string, error) {
 	return latestBuildId, nil
 }
 
+func addJsonMetricToPrometheus(raw []byte) error {
+	var data map[string]interface{}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		panic(err)
+	}
+
+	dataItems, found := data["dataItems"].([]interface{})
+	if !found {
+		return errors.Errorf("dataItems not found or invalid format")
+	}
+
+	for _, e := range dataItems {
+		item, ok := e.(map[string]interface{})
+		if !ok {
+			return errors.Errorf("Invalid data item format")
+		}
+
+		metricName, _ := item["labels"].(map[string]interface{})["Metric"].(string)
+		if metricName == "" {
+			return errors.Errorf("Metric name not found")
+		}
+
+		dataItem, ok := item["data"].(map[string]interface{})
+		if !ok {
+			return errors.Errorf("data not found or invalid format")
+		}
+
+		podStartup := prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: "capz",
+				Subsystem: "PodStartupLatency",
+				Name:      metricName,
+				Help:      metricName,
+			},
+			[]string{"perc"},
+		)
+		prometheus.MustRegister(podStartup)
+
+		for k, v := range dataItem {
+			if value, ok := v.(float64); ok {
+				podStartup.WithLabelValues(k).Set(value)
+			}
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	c := colly.NewCollector()
 
@@ -146,56 +195,10 @@ func main() {
 				return
 			}
 
-			jsonData["PodStartupLatency_PodStartupLatency_load"] = jsonBody
-			fmt.Println("JSON data:", string(jsonBody))
-
-			var data map[string]interface{}
-			if err := json.Unmarshal(jsonData["PodStartupLatency_PodStartupLatency_load"], &data); err != nil {
-				panic(err)
+			if err := addJsonMetricToPrometheus(jsonBody); err != nil {
+				fmt.Println("Error adding JSON metric to Prometheus:", err)
 			}
 
-			dataItems, found := data["dataItems"].([]interface{})
-			if !found {
-				log.Println("dataItems not found")
-				return
-			}
-
-			for _, e := range dataItems {
-				item, ok := e.(map[string]interface{})
-				if !ok {
-					log.Println("Invalid data item format")
-					continue
-				}
-
-				metricName, _ := item["labels"].(map[string]interface{})["Metric"].(string)
-				if metricName == "" {
-					log.Println("Metric name not found")
-					continue
-				}
-
-				dataItem, ok := item["data"].(map[string]interface{})
-				if !ok {
-					log.Println("data not found or invalid format")
-					continue
-				}
-
-				podStartup := prometheus.NewGaugeVec(
-					prometheus.GaugeOpts{
-						Namespace: "capz",
-						Subsystem: "PodStartupLatency",
-						Name:      metricName,
-						Help:      metricName,
-					},
-					[]string{"perc"},
-				)
-				prometheus.MustRegister(podStartup)
-
-				for k, v := range dataItem {
-					if value, ok := v.(float64); ok {
-						podStartup.WithLabelValues(k).Set(value)
-					}
-				}
-			}
 		}
 	})
 

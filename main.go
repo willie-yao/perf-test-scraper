@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/gocolly/colly"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	prowjobv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -155,33 +154,29 @@ func main() {
 				panic(err)
 			}
 
-			arr, found, err := unstructured.NestedSlice(data, "dataItems")
-			if err != nil {
-				panic(err)
-			}
+			dataItems, found := data["dataItems"].([]interface{})
 			if !found {
-				panic("dataItems not found")
+				log.Println("dataItems not found")
+				return
 			}
 
-			fmt.Println("dataItems:", arr)
-
-			for _, e := range arr {
-				item := e.(map[string]interface{})
-				fmt.Println("item:", item)
-				dataItem, found, err := unstructured.NestedMap(item, "data")
-				if err != nil {
-					panic(err)
-				}
-				if !found {
-					panic("data not found")
+			for _, e := range dataItems {
+				item, ok := e.(map[string]interface{})
+				if !ok {
+					log.Println("Invalid data item format")
+					continue
 				}
 
-				metricName, found, err := unstructured.NestedString(item, "labels", "Metric")
-				if err != nil {
-					panic(err)
+				metricName, _ := item["labels"].(map[string]interface{})["Metric"].(string)
+				if metricName == "" {
+					log.Println("Metric name not found")
+					continue
 				}
-				if !found {
-					panic("metric not found")
+
+				dataItem, ok := item["data"].(map[string]interface{})
+				if !ok {
+					log.Println("data not found or invalid format")
+					continue
 				}
 
 				podStartup := prometheus.NewGaugeVec(
@@ -191,14 +186,14 @@ func main() {
 						Name:      metricName,
 						Help:      metricName,
 					},
-					[]string{
-						// Which user has requested the operation?
-						"perc",
-					},
+					[]string{"perc"},
 				)
 				prometheus.MustRegister(podStartup)
+
 				for k, v := range dataItem {
-					podStartup.WithLabelValues(k).Set(v.(float64))
+					if value, ok := v.(float64); ok {
+						podStartup.WithLabelValues(k).Set(value)
+					}
 				}
 			}
 		}

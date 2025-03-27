@@ -22,6 +22,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +36,10 @@ import (
 )
 
 const jobName = "ci-kubernetes-e2e-azure-scalability"
+
+var (
+	clusterName string
+)
 
 func getLatestBuildId() (string, error) {
 	prowjobsURL := "https://prow.k8s.io/prowjobs.js?omit=annotations,labels,decoration_config,pod_spec"
@@ -84,7 +89,7 @@ func addJsonMetricToPrometheus(raw []byte, fileName string) error {
 
 	fileNameParts := strings.Split(fileName, "_")
 	name := strings.Join(fileNameParts[:len(fileNameParts)-2], "_")
-	fmt.Println("Name:", name)
+	// fmt.Println("Name:", name)
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(raw, &data); err != nil {
@@ -119,13 +124,13 @@ func addJsonMetricToPrometheus(raw []byte, fileName string) error {
 				Name:      metricName,
 				Help:      metricName,
 			},
-			[]string{"perc"},
+			[]string{"perc", "cluster"},
 		)
 		prometheus.MustRegister(podStartup)
 
 		for k, v := range dataItem {
 			if value, ok := v.(float64); ok {
-				podStartup.WithLabelValues(k).Set(value)
+				podStartup.WithLabelValues(k, clusterName).Set(value)
 			}
 		}
 	}
@@ -163,12 +168,25 @@ func main() {
 	// Find and visit all links
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
-		// fmt.Println("Link found:", link)
+
+		fmt.Println("Link:", link)
+		if strings.HasSuffix(link, "artifacts/clusters/") {
+			c.Visit("https://gcsweb.k8s.io" + link)
+		}
+
+		if strings.Contains(link, "artifacts/clusters/") {
+			base := path.Base(link)
+			if strings.HasPrefix(base, "capz-") {
+				clusterName = base
+				fmt.Println("Got cluster name:", clusterName)
+			}
+		}
+
 		if strings.Contains(link, "PodStartupLatency") {
 			// fmt.Println("Found PodStartupLatency link:", link)
 			urlParts := strings.Split(link, "/")
 			fileName := urlParts[len(urlParts)-1]
-			fmt.Println("File name:", fileName)
+			// fmt.Println("File name:", fileName)
 
 			// Get json data from the link
 			resp, err := http.Get(link)

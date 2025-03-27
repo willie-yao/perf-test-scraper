@@ -9,6 +9,16 @@ IMAGE_NAME ?= perf-test-scraper
 DOCKER_IMAGE ?= $(REGISTRY)/$(IMAGE_NAME)
 
 ## --------------------------------------
+## Go
+## --------------------------------------
+
+##@ Go:
+
+.PHONY: run
+run: ## Run the application.
+	go run main.go
+	
+## --------------------------------------
 ## Docker
 ## --------------------------------------
 

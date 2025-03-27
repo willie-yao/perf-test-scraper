@@ -27,14 +27,33 @@ import (
 	"time"
 
 	"github.com/gocolly/colly"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	prowjobv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const jobName = "ci-kubernetes-e2e-azure-scalability"
 
 var jsonData = map[string][]byte{}
+
+func recordMetrics() {
+	go func() {
+		for {
+			opsProcessed.Inc()
+			time.Sleep(2 * time.Second)
+		}
+	}()
+}
+
+var (
+	opsProcessed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "myapp_processed_ops_total",
+		Help: "The total number of processed events",
+	})
+)
 
 func getLatestBuildId() (string, error) {
 	prowjobsURL := "https://prow.k8s.io/prowjobs.js?omit=annotations,labels,decoration_config,pod_spec"
@@ -129,7 +148,59 @@ func main() {
 			}
 
 			jsonData["PodStartupLatency_PodStartupLatency_load"] = jsonBody
-			// fmt.Println("JSON data:", string(jsonBody))
+			fmt.Println("JSON data:", string(jsonBody))
+
+			var data map[string]interface{}
+			if err := json.Unmarshal(jsonData["PodStartupLatency_PodStartupLatency_load"], &data); err != nil {
+				panic(err)
+			}
+
+			arr, found, err := unstructured.NestedSlice(data, "dataItems")
+			if err != nil {
+				panic(err)
+			}
+			if !found {
+				panic("dataItems not found")
+			}
+
+			fmt.Println("dataItems:", arr)
+
+			for _, e := range arr {
+				item := e.(map[string]interface{})
+				fmt.Println("item:", item)
+				dataItem, found, err := unstructured.NestedMap(item, "data")
+				if err != nil {
+					panic(err)
+				}
+				if !found {
+					panic("data not found")
+				}
+
+				metricName, found, err := unstructured.NestedString(item, "labels", "Metric")
+				if err != nil {
+					panic(err)
+				}
+				if !found {
+					panic("metric not found")
+				}
+
+				podStartup := prometheus.NewGaugeVec(
+					prometheus.GaugeOpts{
+						Namespace: "capz",
+						Subsystem: "PodStartupLatency",
+						Name:      metricName,
+						Help:      metricName,
+					},
+					[]string{
+						// Which user has requested the operation?
+						"perc",
+					},
+				)
+				prometheus.MustRegister(podStartup)
+				for k, v := range dataItem {
+					podStartup.WithLabelValues(k).Set(v.(float64))
+				}
+			}
 		}
 	})
 
@@ -138,17 +209,6 @@ func main() {
 	})
 
 	http.Handle("/metrics", promhttp.Handler())
-
-	http.HandleFunc("/scraper/PodStartupLatency", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if jsonData["PodStartupLatency_PodStartupLatency_load"] == nil {
-			http.Error(w, "JSON data not found", http.StatusNotFound)
-			return
-		}
-		// Return the JSON data
-		w.Write(jsonData["PodStartupLatency_PodStartupLatency_load"])
-	})
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

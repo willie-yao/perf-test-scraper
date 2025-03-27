@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: perf-test-scraper
+spec:
+  selector:
+    app: perf-test-scraper
+  type: ClusterIP
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080

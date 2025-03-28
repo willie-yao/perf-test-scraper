@@ -85,7 +85,7 @@ func getLatestBuildId() (string, error) {
 	return latestBuildId, nil
 }
 
-func addJsonMetricToPrometheus(raw []byte, fileName string) error {
+func addJsonMetricToPrometheus(raw []byte, fileName string, buildID string) error {
 
 	fileNameParts := strings.Split(fileName, "_")
 	name := strings.Join(fileNameParts[:len(fileNameParts)-2], "_")
@@ -124,13 +124,13 @@ func addJsonMetricToPrometheus(raw []byte, fileName string) error {
 				Name:      metricName,
 				Help:      metricName,
 			},
-			[]string{"perc", "cluster"},
+			[]string{"perc", "cluster", "buildID"},
 		)
 		prometheus.MustRegister(podStartup)
 
 		for k, v := range dataItem {
 			if value, ok := v.(float64); ok {
-				podStartup.WithLabelValues(k, clusterName).Set(value)
+				podStartup.WithLabelValues(k, clusterName, buildID).Set(value)
 			}
 		}
 	}
@@ -182,6 +182,11 @@ func main() {
 			}
 		}
 
+		linkTrim := strings.TrimPrefix(link, "https://storage.googleapis.com/kubernetes-ci-logs/logs/ci-kubernetes-e2e-azure-scalability/")
+		linkTrimParts := strings.Split(linkTrim, "/")
+		buildID := linkTrimParts[0]
+		fmt.Println("Build ID:", buildID)
+
 		if strings.Contains(link, "PodStartupLatency") {
 			// fmt.Println("Found PodStartupLatency link:", link)
 			urlParts := strings.Split(link, "/")
@@ -202,7 +207,7 @@ func main() {
 				return
 			}
 
-			if err := addJsonMetricToPrometheus(jsonBody, fileName); err != nil {
+			if err := addJsonMetricToPrometheus(jsonBody, fileName, buildID); err != nil {
 				fmt.Println("Error adding JSON metric to Prometheus:", err)
 			}
 

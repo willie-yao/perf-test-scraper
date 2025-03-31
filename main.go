@@ -22,17 +22,24 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"path"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/gocolly/colly"
+	"github.com/pkg/errors"
 	prowjobv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const jobName = "ci-kubernetes-e2e-azure-scalability"
 
-var jsonData = map[string][]byte{}
+var (
+	clusterName string
+)
 
 func getLatestBuildId() (string, error) {
 	prowjobsURL := "https://prow.k8s.io/prowjobs.js?omit=annotations,labels,decoration_config,pod_spec"
@@ -78,6 +85,59 @@ func getLatestBuildId() (string, error) {
 	return latestBuildId, nil
 }
 
+func addJsonMetricToPrometheus(raw []byte, fileName string, buildID string) error {
+
+	fileNameParts := strings.Split(fileName, "_")
+	name := strings.Join(fileNameParts[:len(fileNameParts)-2], "_")
+	// fmt.Println("Name:", name)
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		panic(err)
+	}
+
+	dataItems, found := data["dataItems"].([]interface{})
+	if !found {
+		return errors.Errorf("dataItems not found or invalid format")
+	}
+
+	for _, e := range dataItems {
+		item, ok := e.(map[string]interface{})
+		if !ok {
+			return errors.Errorf("Invalid data item format")
+		}
+
+		metricName, _ := item["labels"].(map[string]interface{})["Metric"].(string)
+		if metricName == "" {
+			return errors.Errorf("Metric name not found")
+		}
+
+		dataItem, ok := item["data"].(map[string]interface{})
+		if !ok {
+			return errors.Errorf("data not found or invalid format")
+		}
+
+		podStartup := prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: "capz",
+				Subsystem: name,
+				Name:      metricName,
+				Help:      metricName,
+			},
+			[]string{"perc", "cluster", "buildID"},
+		)
+		prometheus.MustRegister(podStartup)
+
+		for k, v := range dataItem {
+			if value, ok := v.(float64); ok {
+				podStartup.WithLabelValues(k, clusterName, buildID).Set(value)
+			}
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	c := colly.NewCollector()
 
@@ -108,9 +168,30 @@ func main() {
 	// Find and visit all links
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
-		// fmt.Println("Link found:", link)
-		if strings.Contains(link, "/PodStartupLatency_PodStartupLatency_load") {
-			fmt.Println("Found PodStartupLatency link:", link)
+
+		fmt.Println("Link:", link)
+		if strings.HasSuffix(link, "artifacts/clusters/") {
+			c.Visit("https://gcsweb.k8s.io" + link)
+		}
+
+		if strings.Contains(link, "artifacts/clusters/") {
+			base := path.Base(link)
+			if strings.HasPrefix(base, "capz-") {
+				clusterName = base
+				fmt.Println("Got cluster name:", clusterName)
+			}
+		}
+
+		linkTrim := strings.TrimPrefix(link, "https://storage.googleapis.com/kubernetes-ci-logs/logs/ci-kubernetes-e2e-azure-scalability/")
+		linkTrimParts := strings.Split(linkTrim, "/")
+		buildID := linkTrimParts[0]
+		fmt.Println("Build ID:", buildID)
+
+		if strings.Contains(link, "PodStartupLatency") {
+			// fmt.Println("Found PodStartupLatency link:", link)
+			urlParts := strings.Split(link, "/")
+			fileName := urlParts[len(urlParts)-1]
+			// fmt.Println("File name:", fileName)
 
 			// Get json data from the link
 			resp, err := http.Get(link)
@@ -126,8 +207,10 @@ func main() {
 				return
 			}
 
-			jsonData["PodStartupLatency_PodStartupLatency_load"] = jsonBody
-			fmt.Println("JSON data:", string(jsonBody))
+			if err := addJsonMetricToPrometheus(jsonBody, fileName, buildID); err != nil {
+				fmt.Println("Error adding JSON metric to Prometheus:", err)
+			}
+
 		}
 	})
 
@@ -135,16 +218,7 @@ func main() {
 		fmt.Println("Visiting", r.URL)
 	})
 
-	http.HandleFunc("/scraper/PodStartupLatency", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if jsonData["PodStartupLatency_PodStartupLatency_load"] == nil {
-			http.Error(w, "JSON data not found", http.StatusNotFound)
-			return
-		}
-		// Return the JSON data
-		w.Write(jsonData["PodStartupLatency_PodStartupLatency_load"])
-	})
+	http.Handle("/metrics", promhttp.Handler())
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

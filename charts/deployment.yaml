@@ -4,6 +4,8 @@ metadata:
   name: perf-test-scraper
   labels:
     app: perf-test-scraper
+    app.kubernetes.io/name: perf-test-scraper
+    app.kubernetes.io/instance: perf-test-scraper
 spec:
   replicas: 1
   selector:
@@ -16,6 +18,6 @@ spec:
     spec:
       containers:
       - name: perf-test-scraper
-        image: docker.io/quillie/perf-test-scraper:dev
+        image: docker.io/jont828/perf-test-scraper:latest
         ports:
         - containerPort: 8080

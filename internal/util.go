@@ -16,7 +16,7 @@ func getFileNameFromURL(url string) string {
 	return urlParts[len(urlParts)-1]
 }
 
-func getJSONFromURL(url string) (map[string]interface{}, error) {
+func getJSONFromURL(url string) ([]byte, error) {
 	// Get json data from the url
 	resp, err := http.Get(url)
 	if err != nil {
@@ -28,12 +28,8 @@ func getJSONFromURL(url string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	var data map[string]interface{}
-	if err := json.Unmarshal(jsonBody, &data); err != nil {
-		return nil, err
-	}
 
-	return data, nil
+	return jsonBody, nil
 }
 
 func parseBuildIDFromURL(url string) string {

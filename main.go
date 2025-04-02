@@ -67,7 +67,6 @@ func main() {
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		url := e.Attr("href")
 
-		fmt.Println("Link:", url)
 		if strings.HasSuffix(url, "artifacts/clusters/") {
 			c.Visit("https://gcsweb.k8s.io" + url)
 		}
@@ -83,6 +82,11 @@ func main() {
 		if strings.Contains(url, "PodStartupLatency") {
 			if err := internal.RegisterPodStartupMetricsToProm(url, clusterName); err != nil {
 				fmt.Println("Error registering PodStartupLatency metrics:", err)
+			}
+		}
+		if strings.Contains(url, "APIAvailability") {
+			if err := internal.RegisterAPIAvailabilityMetricsToProm(url, clusterName); err != nil {
+				fmt.Println("Error registering API availability metrics:", err)
 			}
 		}
 	})

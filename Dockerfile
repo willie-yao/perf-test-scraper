@@ -6,7 +6,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy the source code into the container
-COPY *.go ./
+COPY main.go ./
+COPY ./internal ./internal
 
 # Build the Go application
 RUN CGO_ENABLED=0 GOOS=linux go build -o perf-test-scraper
